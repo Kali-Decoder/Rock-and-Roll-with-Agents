@@ -8,6 +8,12 @@ contract DiceMania is ReentrancyGuard, Ownable {
 
     uint256 public poolId;
 
+    constructor() Ownable(msg.sender) {}
+
+    /* ------------------------------------------------------------ */
+    /* STRUCTS */
+    /* ------------------------------------------------------------ */
+
     struct DicePool {
         uint256 id;
         uint256 starttime;
@@ -32,13 +38,16 @@ contract DiceMania is ReentrancyGuard, Ownable {
     /* ------------------------------------------------------------ */
 
     function createPool(uint256 duration, uint256 baseamount)
-        external onlyOwner
+        external
+        onlyOwner
     {
         DicePool storage p = pools[poolId];
+
         p.id = poolId;
         p.starttime = block.timestamp;
         p.endtime = block.timestamp + duration;
         p.baseamount = baseamount;
+
         poolId++;
     }
 
@@ -47,16 +56,24 @@ contract DiceMania is ReentrancyGuard, Ownable {
     /* ------------------------------------------------------------ */
 
     function placeBet(uint256 _poolId, uint256 target)
-        external payable
+        external
+        payable
     {
         DicePool storage p = pools[_poolId];
 
         require(!p.ended, "POOL CLOSED");
         require(block.timestamp < p.endtime, "BETTING OVER");
         require(target >= 1 && target <= 12, "Pick 1-12");
-        require(msg.value == p.baseamount, "Wrong bet");
+        require(msg.value == p.baseamount, "Wrong bet amount");
 
-        bets[_poolId].push(DiceBet(msg.sender, msg.value, target));
+        bets[_poolId].push(
+            DiceBet({
+                user: msg.sender,
+                amount: msg.value,
+                targetScore: target
+            })
+        );
+
         p.totalamount += msg.value;
     }
 
@@ -81,7 +98,8 @@ contract DiceMania is ReentrancyGuard, Ownable {
                         block.timestamp,
                         block.prevrandao,
                         msg.sender,
-                        p.totalamount
+                        p.totalamount,
+                        bets[_poolId].length
                     )
                 )
             ) % 12 + 1;
@@ -105,11 +123,14 @@ contract DiceMania is ReentrancyGuard, Ownable {
         uint256 winners = 0;
 
         for (uint256 i = 0; i < poolBets.length; i++) {
-            if (poolBets[i].targetScore == result) winners++;
+            if (poolBets[i].targetScore == result) {
+                winners++;
+            }
         }
 
+        // No winners → owner gets pool
         if (winners == 0) {
-            (bool ok,) = payable(owner()).call{value: p.totalamount}("");
+            (bool ok, ) = payable(owner()).call{value: p.totalamount}("");
             require(ok, "Transfer failed");
             return;
         }
@@ -118,7 +139,7 @@ contract DiceMania is ReentrancyGuard, Ownable {
 
         for (uint256 i = 0; i < poolBets.length; i++) {
             if (poolBets[i].targetScore == result) {
-                (bool ok,) = payable(poolBets[i].user).call{value: reward}("");
+                (bool ok, ) = payable(poolBets[i].user).call{value: reward}("");
                 require(ok, "Transfer failed");
             }
         }
@@ -129,7 +150,8 @@ contract DiceMania is ReentrancyGuard, Ownable {
     /* ------------------------------------------------------------ */
 
     function getPool(uint256 _poolId)
-        external view
+        external
+        view
         returns (
             uint256 id,
             uint256 start,
@@ -142,6 +164,7 @@ contract DiceMania is ReentrancyGuard, Ownable {
         )
     {
         DicePool storage p = pools[_poolId];
+
         return (
             p.id,
             p.starttime,
@@ -155,7 +178,8 @@ contract DiceMania is ReentrancyGuard, Ownable {
     }
 
     function getBets(uint256 _poolId)
-        external view
+        external
+        view
         returns (DiceBet[] memory)
     {
         return bets[_poolId];
@@ -170,7 +194,8 @@ contract DiceMania is ReentrancyGuard, Ownable {
     /* ------------------------------------------------------------ */
 
     function withdraw(uint256 amount) external onlyOwner {
-        (bool ok,) = payable(owner()).call{value: amount}("");
+        require(amount <= address(this).balance, "Not enough balance");
+        (bool ok, ) = payable(owner()).call{value: amount}("");
         require(ok, "Withdraw failed");
     }
 
